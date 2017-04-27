@@ -27,7 +27,7 @@ from homeassistant.util.async import (
     run_coroutine_threadsafe, run_callback_threadsafe)
 from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP, CONF_VALUE_TEMPLATE, CONF_USERNAME,
-    CONF_PASSWORD, CONF_PORT, CONF_PROTOCOL, CONF_PAYLOAD)
+    CONF_PASSWORD, CONF_PORT, CONF_PROTOCOL, CONF_TRANSPORT, CONF_PAYLOAD)
 from homeassistant.components.mqtt.server import HBMQTT_CONFIG_SCHEMA
 
 REQUIREMENTS = ['paho-mqtt==1.3.1']
@@ -65,11 +65,15 @@ CONF_RETAIN = 'retain'
 PROTOCOL_31 = '3.1'
 PROTOCOL_311 = '3.1.1'
 
+TRANSPORT_TCP = 'tcp'
+TRANSPORT_WS = 'websockets'
+
 DEFAULT_PORT = 1883
 DEFAULT_KEEPALIVE = 60
 DEFAULT_QOS = 0
 DEFAULT_RETAIN = False
 DEFAULT_PROTOCOL = PROTOCOL_311
+DEFAULT_TRANSPORT = TRANSPORT_WS
 DEFAULT_DISCOVERY = False
 DEFAULT_DISCOVERY_PREFIX = 'homeassistant'
 DEFAULT_TLS_PROTOCOL = 'auto'
@@ -132,6 +136,8 @@ CONFIG_SCHEMA = vol.Schema({
             vol.Any('auto', '1.0', '1.1', '1.2'),
         vol.Optional(CONF_PROTOCOL, default=DEFAULT_PROTOCOL):
             vol.All(cv.string, vol.In([PROTOCOL_31, PROTOCOL_311])),
+        vol.Optional(CONF_TRANSPORT, default=DEFAULT_TRANSPORT):
+            vol.All(cv.string, vol.In([TRANSPORT_TCP, TRANSPORT_WS])),
         vol.Optional(CONF_EMBEDDED): HBMQTT_CONFIG_SCHEMA,
         vol.Optional(CONF_WILL_MESSAGE): MQTT_WILL_BIRTH_SCHEMA,
         vol.Optional(CONF_BIRTH_MESSAGE): MQTT_WILL_BIRTH_SCHEMA,
@@ -322,9 +328,10 @@ def async_setup(hass, config):
         client_cert = conf.get(CONF_CLIENT_CERT)
         tls_insecure = conf.get(CONF_TLS_INSECURE)
         protocol = conf[CONF_PROTOCOL]
+        transport = conf[CONF_TRANSPORT]
     elif broker_config:
         # If no broker passed in, auto config to internal server
-        broker, port, username, password, certificate, protocol = broker_config
+        broker, port, username, password, certificate, protocol, transport = broker_config
         # Embedded broker doesn't have some ssl variables
         client_key, client_cert, tls_insecure = None, None, None
         # hbmqtt requires a client id to be set.
@@ -371,7 +378,7 @@ def async_setup(hass, config):
         hass.data[DATA_MQTT] = MQTT(
             hass, broker, port, client_id, keepalive, username, password,
             certificate, client_key, client_cert, tls_insecure, protocol,
-            will_message, birth_message, tls_version)
+            transport, will_message, birth_message, tls_version)
     except socket.error:
         _LOGGER.exception("Can't connect to the broker. "
                           "Please check your settings and the broker itself")
@@ -429,8 +436,8 @@ class MQTT(object):
 
     def __init__(self, hass, broker, port, client_id, keepalive, username,
                  password, certificate, client_key, client_cert,
-                 tls_insecure, protocol, will_message, birth_message,
-                 tls_version):
+                 tls_insecure, protocol, transport, will_message,
+                 birth_message, tls_version):
         """Initialize Home Assistant MQTT client."""
         import paho.mqtt.client as mqtt
 
@@ -450,9 +457,10 @@ class MQTT(object):
             proto = mqtt.MQTTv311
 
         if client_id is None:
-            self._mqttc = mqtt.Client(protocol=proto)
+            self._mqttc = mqtt.Client(protocol=proto, transport=transport)
         else:
-            self._mqttc = mqtt.Client(client_id, protocol=proto)
+            self._mqttc = mqtt.Client(
+                client_id, protocol=proto, transport=transport)
 
         if username is not None:
             self._mqttc.username_pw_set(username, password)
